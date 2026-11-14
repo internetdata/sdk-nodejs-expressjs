@@ -2,6 +2,12 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff.
 
+## 1.0.1 - 2026-11-14
+
+### Fixes
+
+- Require @internetdata/internetdata 2.10.1: a 403 can mean the key lacks the ip.lookup scope ([`b224314`](https://github.com/internetdata/sdk-nodejs-expressjs/commit/b224314fa96b59e058ef6dd7714f1a19a9c33ae5))
+
 ## 1.0.0 - 2026-11-14
 
 ### Features
