@@ -1,0 +1,342 @@
+// The adapter, against a real Express app on a real socket. The shared
+// conformance corpus is asserted in conformance.test.mjs.
+//
+// A test server answers on the loopback, so `req.ip` is a bogon and is answered
+// locally without a request. Anything that needs a served answer therefore has
+// to arrive wearing a public address - through `trust proxy`, or a selector.
+
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { after, test } from 'node:test';
+
+import express from 'express';
+import { InternetData } from '@internetdata/internetdata';
+
+import {
+    defaultIpSelector, headerIpSelector, internetdata, xffIpSelector,
+} from '../dist/index.js';
+
+const data = JSON.parse(readFileSync(new URL('../testdata/testdata.json', import.meta.url), 'utf8'));
+// Served answers from the lookup corpus: Unlimited's, and a paid plan's.
+const UNLIMITED = data.lookup.find((c) => c.name === 'unlimited-answer').body;
+const PAID = data.lookup.find((c) => c.name === 'paid-full-shape').body;
+const PUBLIC_IP = PAID.ip;
+const servers = [];
+
+after(() => {
+    for (const s of servers) {
+        s.close();
+    }
+});
+
+// A client whose every answer is `body` for the address asked about, recording
+// those addresses - which is what the client-address tests actually assert on.
+function stubClient(body = PAID) {
+    const asked = [];
+    const client = new InternetData({
+        cache: false,
+        retries: 0,
+        fetch: async (input) => {
+            const url = new URL(typeof input === 'string' ? input : input.url);
+            const ip = decodeURIComponent(url.pathname.slice(1));
+            asked.push(ip);
+            return new Response(JSON.stringify({ ...body, ip: ip }), {
+                status: 200, headers: { 'content-type': 'application/json' },
+            });
+        },
+    });
+    return { client: client, asked: asked };
+}
+
+async function serve(configure) {
+    const app = express();
+    configure(app);
+    app.get('/', (req, res) => {
+        res.json({
+            ip: req.internetdata?.ip ?? null,
+            country: req.internetdata?.result?.location.country ?? null,
+            isVpn: req.internetdata?.result?.isVpn ?? null,
+            isBogon: req.internetdata?.result?.isBogon ?? null,
+            error: req.internetdata?.error?.kind ?? null,
+            attached: req.internetdata !== undefined,
+        });
+    });
+    const server = await new Promise((resolve) => {
+        const s = app.listen(0, '127.0.0.1', () => resolve(s));
+    });
+    servers.push(server);
+    const base = `http://127.0.0.1:${server.address().port}`;
+    return async (headers = {}) => {
+        const res = await fetch(`${base}/`, { headers: headers });
+        return { status: res.status, body: await res.json().catch(() => null) };
+    };
+}
+
+// Most cases only care about the decision, not about where the address came
+// from, so they pin the address and let the selectors be tested on their own.
+const fixedIp = () => PUBLIC_IP;
+
+test('enriches the request and leaves the decision to the app', async () => {
+    const { client: client, asked: asked } = stubClient(UNLIMITED);
+    const call = await serve((app) => app.use(internetdata({
+        client: client, ipSelector: fixedIp,
+    })));
+    const res = await call();
+    assert.equal(res.status, 200);
+    assert.equal(res.body.attached, true);
+    assert.equal(res.body.country, 'AT');
+    assert.equal(res.body.isVpn, null, 'Unlimited leaves is_vpn out, and absent is not false');
+    assert.equal(res.body.ip, PUBLIC_IP);
+    assert.deepEqual(asked, [PUBLIC_IP]);
+});
+
+test('blocks with 403 on a country condition, and passes another country', async () => {
+    const blocked = await serve((app) => app.use(internetdata({
+        client: stubClient(UNLIMITED).client, ipSelector: fixedIp,
+        blockCondition: { location: { country: ['DE', 'AT'] } },
+    })));
+    const denied = await blocked();
+    assert.equal(denied.status, 403);
+    assert.deepEqual(denied.body, { error: 'access denied' });
+
+    const allowed = await serve((app) => app.use(internetdata({
+        client: stubClient(UNLIMITED).client, ipSelector: fixedIp,
+        blockCondition: { location: { country: 'DE' } },
+    })));
+    assert.equal((await allowed()).status, 200);
+});
+
+test('blocks on a network type, and on anonymity, and passes a clean answer', async () => {
+    const hosting = await serve((app) => app.use(internetdata({
+        client: stubClient(UNLIMITED).client, ipSelector: fixedIp,
+        blockCondition: { asn: { type: 'hosting' } },
+    })));
+    assert.equal((await hosting()).status, 403);
+
+    const anonymous = await serve((app) => app.use(internetdata({
+        client: stubClient(PAID).client, ipSelector: fixedIp,
+        blockCondition: [{ isTor: true }, { isVpn: true }],
+    })));
+    assert.equal((await anonymous()).status, 403);
+
+    const clean = { ...PAID, is_vpn: false, vpn: {} };
+    const passing = await serve((app) => app.use(internetdata({
+        client: stubClient(clean).client, ipSelector: fixedIp,
+        blockCondition: [{ isTor: true }, { isVpn: true }],
+    })));
+    assert.equal((await passing()).status, 200);
+});
+
+test('a condition reaching the evidence fields is what a flag list cannot do', async () => {
+    const mullvad = stubClient(PAID);
+    const call = await serve((app) => app.use(internetdata({
+        client: mullvad.client, ipSelector: fixedIp, blockCondition: { vpn: { provider: 'nordvpn' } },
+    })));
+    assert.equal((await call()).status, 200, 'a different provider must not match');
+
+    const call2 = await serve((app) => app.use(internetdata({
+        client: mullvad.client, ipSelector: fixedIp,
+        blockCondition: { vpn: { provider: 'mullvad' } },
+    })));
+    assert.equal((await call2()).status, 403);
+});
+
+test('onBlocked replaces the refusal entirely', async () => {
+    const { client: client } = stubClient(PAID);
+    const call = await serve((app) => app.use(internetdata({
+        client: client,
+        ipSelector: fixedIp,
+        blockCondition: { location: { country: 'AT' } },
+        onBlocked: (req, res, lookup) => {
+            res.status(451).json({ why: lookup.result.location.country });
+        },
+    })));
+    const res = await call();
+    assert.equal(res.status, 451);
+    assert.deepEqual(res.body, { why: 'AT' });
+});
+
+test('skip leaves the request untouched', async () => {
+    const { client: client, asked: asked } = stubClient();
+    const call = await serve((app) => app.use(internetdata({
+        client: client, ipSelector: fixedIp, blockCondition: { isVpn: true },
+        skip: (req) => req.path === '/',
+    })));
+    const res = await call();
+    assert.equal(res.status, 200);
+    assert.equal(res.body.attached, false);
+    assert.deepEqual(asked, []);
+});
+
+test('a failing lookup lets the visitor through', async () => {
+    const failing = new InternetData({
+        retries: 0,
+        fetch: async () => new Response('{"error":"boom"}', { status: 500 }),
+    });
+    const call = await serve((app) => app.use(internetdata({
+        client: failing, ipSelector: fixedIp, blockCondition: { isVpn: true },
+    })));
+    const res = await call();
+    assert.equal(res.status, 200);
+    assert.equal(res.body.error, 'server_error');
+});
+
+test('onMissingField: throw reaches the express error handler', async () => {
+    const free = stubClient(UNLIMITED);
+    const call = await serve((app) => {
+        app.use(internetdata({
+            client: free.client, ipSelector: fixedIp,
+            blockCondition: { location: { city: 'Vienna' } }, onMissingField: 'throw',
+        }));
+        app.use((err, _req, res, _next) => {
+            res.status(500).json({ message: err.message });
+        });
+    });
+    const res = await call();
+    assert.equal(res.status, 500);
+    assert.match(res.body.message, /location\.city, which your plan does not include/);
+});
+
+// The test that matters. Every other assertion here would pass whether or not
+// the selector is right, because a direct connection has nothing to confuse.
+test('a forged X-Forwarded-For is ignored by default and honoured only on request', async () => {
+    const forgery = { 'x-forwarded-for': PUBLIC_IP };
+
+    const plain = stubClient();
+    const untrusting = await serve((app) => app.use(internetdata({ client: plain.client })));
+    const direct = await untrusting(forgery);
+    assert.equal(direct.body.ip, '127.0.0.1',
+        'with trust proxy off, req.ip is the socket peer and the header is a forgery');
+    assert.deepEqual(plain.asked, [], 'and a bogon is answered locally, so nothing was asked');
+
+    const trusting = stubClient();
+    const trusted = await serve((app) => {
+        app.set('trust proxy', true);
+        app.use(internetdata({ client: trusting.client }));
+    });
+    const viaTrust = await trusted(forgery);
+    assert.equal(viaTrust.body.ip, PUBLIC_IP,
+        'trust proxy is the application saying it believes the header');
+    assert.deepEqual(trusting.asked, [PUBLIC_IP]);
+
+    const explicit = stubClient();
+    const viaSelector = await serve((app) => app.use(internetdata({
+        client: explicit.client, ipSelector: xffIpSelector(),
+    })));
+    assert.equal((await viaSelector(forgery)).body.ip, PUBLIC_IP);
+    assert.deepEqual(explicit.asked, [PUBLIC_IP]);
+});
+
+test('a header selector reads the edge that writes it', async () => {
+    const { client: client, asked: asked } = stubClient();
+    const call = await serve((app) => app.use(internetdata({
+        client: client, ipSelector: headerIpSelector('CF-Connecting-IP'),
+    })));
+    assert.equal((await call({ 'cf-connecting-ip': '45.83.91.9' })).body.ip, '45.83.91.9');
+    assert.equal((await call({})).body.ip, '127.0.0.1',
+        'and falls back to req.ip when the edge did not write one');
+    assert.deepEqual(asked, ['45.83.91.9']);
+});
+
+test('depth counts trusted hops from the right', async () => {
+    const { client: client, asked: asked } = stubClient();
+    const call = await serve((app) => app.use(internetdata({
+        client: client, ipSelector: xffIpSelector({ depth: 1 }),
+    })));
+    await call({ 'x-forwarded-for': `${PUBLIC_IP}, 70.41.3.18, 150.172.238.178` });
+    assert.deepEqual(asked, ['150.172.238.178']);
+});
+
+test('the default selector is req.ip', async () => {
+    const { client: client } = stubClient();
+    const call = await serve((app) => app.use(internetdata({
+        client: client, ipSelector: defaultIpSelector,
+    })));
+    assert.equal((await call()).body.ip, '127.0.0.1');
+});
+
+test('a private client address is answered locally and never blocks', async () => {
+    const { client: client, asked: asked } = stubClient();
+    const warnings = [];
+    const call = await serve((app) => app.use(internetdata({
+        client: client, blockCondition: { isVpn: true }, onWarn: (m) => warnings.push(m),
+    })));
+    const res = await call();
+    assert.equal(res.status, 200, 'local development must not lock you out of your own app');
+    assert.equal(res.body.isBogon, true);
+    assert.deepEqual(asked, []);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /not a public address/);
+});
+
+test('the deadline bounds the request rather than the visitor waiting on us', async () => {
+    const hung = new InternetData({ retries: 0, fetch: () => new Promise(() => {}) });
+    const call = await serve((app) => app.use(internetdata({
+        client: hung, ipSelector: fixedIp, timeoutMs: 150, blockCondition: { isVpn: true },
+    })));
+    const started = Date.now();
+    const res = await call();
+    assert.equal(res.status, 200);
+    assert.equal(res.body.error, 'network');
+    assert.ok(Date.now() - started < 3000, 'the visitor was held past the budget');
+});
+
+test('a condition that constrains nothing is refused at construction', () => {
+    assert.throws(() => internetdata({ blockCondition: { isVpn: false } }), /constrains nothing/);
+    assert.throws(() => internetdata({ blockCondition: {} }), /constrains nothing/);
+});
+
+// Built exactly as the README builds it: the README's `trust proxy`, and an API key
+// from the environment and nothing else. Every other test passes a client, so none
+// could see the middleware fail to start, or send no key, the README's way.
+test('builds as the README does, with the key set and unset', async () => {
+    const realFetch = globalThis.fetch;
+    const savedKey = process.env.INTERNETDATA_API_KEY;
+    const sent = [];
+    globalThis.fetch = async (input, init) => {
+        const request = new Request(input, init);
+        if (new URL(request.url).hostname !== 'api.internetdata.io') {
+            return realFetch(input, init);
+        }
+        sent.push({ path: new URL(request.url).pathname, auth: request.headers.get('authorization') });
+        return new Response(JSON.stringify(UNLIMITED), {
+            status: 200, headers: { 'content-type': 'application/json' },
+        });
+    };
+    try {
+        for (const key of ['readme-key', undefined]) {
+            if (key === undefined) {
+                delete process.env.INTERNETDATA_API_KEY;
+            } else {
+                process.env.INTERNETDATA_API_KEY = key;
+            }
+            sent.length = 0;
+
+            const app = express();
+            app.set('trust proxy', 'loopback');
+            app.use(internetdata({ apiKey: process.env.INTERNETDATA_API_KEY }));
+            app.get('/', (req, res) => {
+                const { result } = req.internetdata;
+                res.send(`Hello, visitor from ${result?.location.country_name ?? 'somewhere'}`);
+            });
+            const server = await new Promise((resolve) => {
+                const s = app.listen(0, '127.0.0.1', () => resolve(s));
+            });
+            servers.push(server);
+
+            const res = await realFetch(`http://127.0.0.1:${server.address().port}/`, {
+                headers: { 'x-forwarded-for': PUBLIC_IP },
+            });
+            assert.equal(res.status, 200, `key ${key}`);
+            assert.equal(await res.text(), 'Hello, visitor from Austria', `key ${key}`);
+            assert.deepEqual(sent, [{ path: `/${PUBLIC_IP}`, auth: key === undefined ? null : `Bearer ${key}` }]);
+        }
+    } finally {
+        globalThis.fetch = realFetch;
+        if (savedKey === undefined) {
+            delete process.env.INTERNETDATA_API_KEY;
+        } else {
+            process.env.INTERNETDATA_API_KEY = savedKey;
+        }
+    }
+});
