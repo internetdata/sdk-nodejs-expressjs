@@ -2,6 +2,12 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff.
 
+## 1.0.2 - 2026-11-15
+
+### Features
+
+- Require internetdata 2.11.0: hosted_domains lists its 10 most popular domains ([`c958c29`](https://github.com/internetdata/sdk-nodejs-expressjs/commit/c958c29ea495dcfc2c9d743f462f56c5ed84524a))
+
 ## 1.0.1 - 2026-11-14
 
 ### Fixes
