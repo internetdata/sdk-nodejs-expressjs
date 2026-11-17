@@ -2,6 +2,12 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff.
 
+## 1.0.4 - 2026-11-17
+
+### Features
+
+- Require internetdata 2.13.0: cap_reached on a paid answer past its overage cap ([`1d76c63`](https://github.com/internetdata/sdk-nodejs-expressjs/commit/1d76c6366669c20b89c6af6f9c8c46909c3db19c))
+
 ## 1.0.3 - 2026-11-16
 
 ### Features
