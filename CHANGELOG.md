@@ -2,6 +2,12 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff.
 
+## 1.0.5 - 2026-11-18
+
+### Fixes
+
+- Require internetdata 2.14.0: every request names the SDK ([`d4f6f66`](https://github.com/internetdata/sdk-nodejs-expressjs/commit/d4f6f66c4cb14747f052c14edcc6d1d3415e831a))
+
 ## 1.0.4 - 2026-11-17
 
 ### Features
