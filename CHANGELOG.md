@@ -2,6 +2,12 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff.
 
+## 1.0.7 - 2026-11-20
+
+### Fixes
+
+- Require internetdata 2.14.2: the spec re-pinned to 2026.11.20 ([`d5eb3d2`](https://github.com/internetdata/sdk-nodejs-expressjs/commit/d5eb3d29d2711b91570b422e0427176755322f11))
+
 ## 1.0.6 - 2026-11-19
 
 ### Fixes
