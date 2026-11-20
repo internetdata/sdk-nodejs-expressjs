@@ -2,6 +2,12 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff.
 
+## 1.0.8 - 2026-11-20
+
+### Fixes
+
+- Require internetdata 2.15.0: a paid domain answer's hosting, home page and linking domains ([`dff0d42`](https://github.com/internetdata/sdk-nodejs-expressjs/commit/dff0d426e21aca80d3f59a7b3e462327c88e7f8a))
+
 ## 1.0.7 - 2026-11-20
 
 ### Fixes
