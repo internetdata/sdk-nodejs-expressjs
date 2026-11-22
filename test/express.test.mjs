@@ -127,6 +127,23 @@ test('blocks on a network type, and on anonymity, and passes a clean answer', as
     assert.equal((await passing()).status, 200);
 });
 
+// Every answer carries `is_bot`, on every plan, so a condition on it blocks a
+// crawler's public address and passes any other visitor's.
+test('blocks a bot on isBot from its public address, and passes another visitor', async () => {
+    const bot = data.lookup.find((c) => c.name === 'paid-bot').body;
+    const { client: client, asked: asked } = stubClient(bot);
+    const blocked = await serve((app) => app.use(internetdata({
+        client: client, ipSelector: () => bot.ip, blockCondition: { isBot: true },
+    })));
+    assert.equal((await blocked()).status, 403);
+    assert.deepEqual(asked, [bot.ip]);
+
+    const passing = await serve((app) => app.use(internetdata({
+        client: stubClient(UNLIMITED).client, ipSelector: fixedIp, blockCondition: { isBot: true },
+    })));
+    assert.equal((await passing()).status, 200);
+});
+
 test('a condition reaching the evidence fields is what a flag list cannot do', async () => {
     const mullvad = stubClient(PAID);
     const call = await serve((app) => app.use(internetdata({
