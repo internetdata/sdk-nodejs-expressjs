@@ -2,6 +2,12 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff.
 
+## 1.0.10 - 2026-11-23
+
+### Fixes
+
+- Require internetdata 2.16.1 ([`876b136`](https://github.com/internetdata/sdk-nodejs-expressjs/commit/876b1366e11b0f0a7e519f652ea3f0e0c232aa2f))
+
 ## 1.0.9 - 2026-11-22
 
 ### Features
