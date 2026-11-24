@@ -2,6 +2,12 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff.
 
+## 1.0.11 - 2026-11-24
+
+### Features
+
+- Require @internetdata/internetdata 2.17.0: a condition on a list member matches any element ([`0165860`](https://github.com/internetdata/sdk-nodejs-expressjs/commit/0165860340159001163e2d2e1d68da191f9d4df8))
+
 ## 1.0.10 - 2026-11-23
 
 ### Fixes
