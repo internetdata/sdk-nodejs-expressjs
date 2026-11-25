@@ -217,7 +217,7 @@ test('onMissingField: throw reaches the express error handler', async () => {
 
 // The test that matters. Every other assertion here would pass whether or not
 // the selector is right, because a direct connection has nothing to confuse.
-test('a forged X-Forwarded-For is ignored by default and honoured only on request', async () => {
+test('a forged X-Forwarded-For is ignored by default and honored only on request', async () => {
     const forgery = { 'x-forwarded-for': PUBLIC_IP };
 
     const plain = stubClient();
