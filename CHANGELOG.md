@@ -2,6 +2,13 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff.
 
+## 1.1.0 - 2026-11-25
+
+### Features
+
+- Let a verified crawler through with allowBots ([`e102ae0`](https://github.com/internetdata/sdk-nodejs-expressjs/commit/e102ae0bfadbdf29a2d4fcc64948c89b212b7702))
+- Require @internetdata/internetdata 2.18.0: a user agent sent with a lookup, and allowBots in the middleware core ([`a239340`](https://github.com/internetdata/sdk-nodejs-expressjs/commit/a2393406086102be5ccbb239d3bf3907af5fa267))
+
 ## 1.0.11 - 2026-11-24
 
 ### Features
